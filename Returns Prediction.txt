@@ -1,0 +1,145 @@
+AMAZON L5 DATA SCIENTIST — MODELING CASE #3 (Returns Prediction + Cost / CX Tradeoffs)
+
+Context
+You’re on an Amazon Retail team. Product returns create major cost (reverse logistics, refurbish/write-off)
+and also impact customer experience. The business wants to predict, at the time of purchase, which orders
+are likely to be returned so they can:
+- improve sizing/fit guidance and PDP content
+- adjust post-purchase messaging (e.g., how-to setup)
+- route high-risk orders to different packaging/fulfillment options
+- reduce preventable returns (without harming conversion)
+
+Predicting “return probability at time of purchase” is a widely used retail ML use case. :contentReference[oaicite:0]{index=0}
+
+
+────────────────────────────────────────────────────────────────────────────
+1) The Case Prompt
+
+Goal
+Build a model that predicts P(returned = 1 | info available at purchase time).
+
+Label
+returned = 1 if the customer initiates a return within 30 days of delivery
+returned = 0 otherwise
+
+Data (18 months)
+Order-level:
+- order_id, purchase_ts, delivery_ts
+- item_id (ASIN), category, price, discount, promotion_id
+- size/color/variation, weight/dimensions
+Customer-level (known at purchase time):
+- customer_id (hashed), tenure, Prime flag
+- historical return rate (last 90d/365d), order frequency, spend
+Listing-level:
+- seller_id / brand, fulfillment (FBA/FBM), inventory location region
+- PDP signals: title length, number of images, review stats (avg rating, count)
+Optional text (if available at purchase time):
+- review snippets / product description embeddings
+
+Constraints
+- Inference at checkout < 50ms p95
+- Return rate ~8–15% overall; varies heavily by category (apparel higher)
+- Strong seasonality (holidays) + new products (cold-start ASINs)
+
+Tasks
+A) Propose an end-to-end modeling approach (data → model → evaluation → deployment).
+B) Explain how you avoid leakage (esp. delivery-dependent features).
+C) Pick metrics + how you choose operating thresholds given different costs.
+D) Propose an online test plan and business impact measurement.
+E) List 5 failure modes + monitoring/debug plan.
+
+
+────────────────────────────────────────────────────────────────────────────
+2) Strong L5 Solution Outline (what “excellent” looks like)
+
+A) Modeling approach
+1) Frame
+- Binary classification: return vs not-return
+- Output: calibrated probability + risk buckets per category (because base rates differ)
+
+2) Time-aware split + “label maturity”
+Returns happen AFTER delivery; labels are delayed.
+- Train: months 1–12, but only orders with delivery_ts at least 30 days before the data cutoff
+- Val: month 13
+- Test: months 14–15 (matured)
+- Keep last 3 months as “future shadow” for drift evaluation (if labels mature later)
+
+3) Model choice
+- Baseline: regularized logistic regression (fast, interpretable)
+- Likely final: Gradient-boosted trees (LightGBM/CatBoost)
+  - Strong for heterogeneous tabular features
+  - Fast inference, good feature attribution for business partners
+- Optional: add text features (reviews/description embeddings) if they exist at purchase time.
+  Amazon research shows customer reviews can help predict return behaviors. :contentReference[oaicite:1]{index=1}
+
+B) Leakage controls (critical)
+Only allow features known at PURCHASE time.
+Exclude anything that depends on events after purchase:
+- actual delivery delay, carrier scans, return reason codes, customer service contacts, refunds
+- any “post-delivery engagement” metrics
+Also watch “proxy leakage”:
+- If you use delivery_ts directly, you’re leaking future info. Delivery_ts is not known at purchase time.
+Use expected delivery estimate (what was promised) if that’s shown at checkout.
+
+C) Metrics + thresholding (cost-sensitive)
+Offline metrics
+- PR-AUC (because base rate can be moderate but segment imbalance can be severe)
+- Calibration (Brier score / reliability), since you’ll trigger actions based on probability
+- Segment metrics by category, price tier, new vs established ASINs
+
+Decisioning / threshold
+Returns have different costs:
+- False positive (predict return but not returned): might add friction, harm conversion
+- False negative (miss a return): avoidable reverse-logistics cost persists
+Use an expected value objective:
+- Choose threshold(s) that minimize:
+  E[cost] = C_FN * FN + C_FP * FP + C_action * (# actions)
+Make thresholds category-specific (apparel vs electronics) to respect different base rates and costs.
+
+D) Online test plan (A/B)
+Randomize at customer_id or session level.
+Control: existing PDP + messaging
+Treatment: interventions triggered by model bucket (NOT necessarily “show them less”)
+
+Example interventions (safer, CX-friendly)
+- Better size/fit prompts for apparel
+- Setup guidance / compatibility checks for electronics
+- More transparent delivery + packaging options for fragile items
+
+Success metrics
+- Primary: return rate (or return units) and net contribution margin improvement
+- Secondary: customer satisfaction proxies; CS contacts; repeat purchase
+- Guardrails: conversion rate, AOV, cancellation rate
+
+AWS retail guidance explicitly calls out predicting return probability at purchase time and using ML to reduce returns / improve return experiences. :contentReference[oaicite:2]{index=2}
+
+E) 5 failure modes + debugging/monitoring
+1) Category shift / seasonality
+- Monitor PR-AUC + calibration weekly by category; retrain cadence before peak seasons.
+2) Cold-start ASINs
+- Hierarchical smoothing: ASIN → brand → category → global
+- Feature backoff for new items
+3) Hidden policy feedback loops
+- If interventions reduce returns, labels change → re-train with careful holdout traffic.
+4) Miscalibration in high-risk buckets
+- Recalibrate on recent data (Platt/isotonic) per category.
+5) Bias / fairness concerns
+- Audit model actions by geography and customer cohorts; ensure interventions are “assistive” not punitive.
+
+────────────────────────────────────────────────────────────────────────────
+3) Modeling-heavy follow-ups (practice)
+
+Q1) “How would you use text?”
+A) Only text available at purchase time (reviews, description). Turn into embeddings or TF-IDF; add to GBDT
+or a shallow neural model; validate incremental lift and latency budget. :contentReference[oaicite:3]{index=3}
+
+Q2) “Why PR-AUC over ROC-AUC?”
+A) PR-AUC reflects precision/recall tradeoffs under imbalance and aligns with downstream decision costs.
+
+Q3) “How do you explain the model to business?”
+A) Global + segment feature importance; SHAP summaries; build playbooks per risk bucket
+(e.g., “top drivers: size/fit mismatch, high historical returns, low review count”).
+
+Q4) “What’s your baseline?”
+A) Simple heuristics: high-return categories + customer past return rate + low review count + high size variance;
+compare to logistic regression and tree model.
