@@ -11,7 +11,7 @@ and decide whether to (a) approve, (b) step-up verify, or (c) decline.
 Fraud detection is a common Amazon ML domain; AWS publishes multiple fraud-detection solution patterns.) :contentReference[oaicite:0]{index=0}
 
 
----
+
 ## 1) The Case Prompt (what the interviewer gives you)
 
 Build a real-time fraud model that outputs a risk score at checkout within 50ms p95.
@@ -42,7 +42,7 @@ E) List 5 failure modes + monitoring.
 (These are common expectations in Amazon DS interview prep resources: imbalance handling, tradeoffs, debugging.) :contentReference[oaicite:1]{index=1}
 
 
----
+
 ## 2) “Strong L5” Solution Outline
 
 ### A) End-to-end approach
@@ -118,7 +118,7 @@ Primary outcomes:
 (These themes match common Amazon DS interview expectations and “how interviewers assess case performance.”) :contentReference[oaicite:3]{index=3}
 
 
----3) Modeling-heavy follow-ups (practice)
+## 3) Modeling-heavy follow-ups (practice)
 
 Q1) “What features matter most?”
 - velocity features (login/order counts), device/address reuse counts, mismatch flags,
